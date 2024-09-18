@@ -53,15 +53,25 @@ const Index = () => {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(1024, 1, 1);
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0 && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-          socketRef.current.send(event.data);
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      processor.onaudioprocess = (e) => {
+        const audioData = e.inputBuffer.getChannelData(0);
+        const dataArray = new Float32Array(1024);
+        for (let i = 0; i < 1024; i++) {
+          dataArray[i] = audioData[i];
+        }
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(dataArray);
+          console.log('Sent audio chunk of size:', dataArray.length);
         }
       };
 
-      mediaRecorderRef.current.start(1000 / (16000 / 1024)); // Adjust for 16kHz sample rate and 1024 chunk size
       setIsRecording(true);
       toast.success("Recording started");
     } catch (error) {
@@ -71,10 +81,13 @@ const Index = () => {
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      toast.success("Recording stopped");
+    if (isRecording) {
+      // Stop the audio context and disconnect nodes
+      const audioContext = new AudioContext();
+      audioContext.close().then(() => {
+        setIsRecording(false);
+        toast.success("Recording stopped");
+      });
     }
   };
 
